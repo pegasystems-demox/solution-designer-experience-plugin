@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "DemoX Solution Designer Experience Plugin",
+  "version": "0.1.0",
+  "description": "Logs user interactions on Pega Blueprint and batches them to a local server.",
+  "permissions": ["storage", "alarms", "scripting", "activeTab", "tabs"],
+  "host_permissions": [
+    "https://www.pega.com/blueprint/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Event Logger"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}
