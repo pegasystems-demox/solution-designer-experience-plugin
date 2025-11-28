@@ -5,6 +5,150 @@
   const ENABLE_KEYSTROKE_SNAPSHOT = true;
   const KEY_SNAPSHOT_INTERVAL_MS = 1000;
   const EMIT_PER_KEY_EVENT = true;
+  const isTopFrame = window.top === window.self;
+
+  let cachedEmail = null;
+  let lastEmailFetchTs = 0;
+  let userEmail = null;
+  function readEmailFromDom() {
+    try {
+      const el = document.getElementById("lmms-user-email");
+      if (!el) return null;
+      const val = typeof el.value === "string" ? el.value.trim() : null;
+      return val && val.length ? val : null;
+    } catch {
+      return null;
+    }
+  }
+
+  if (isTopFrame) {
+    if (!window.__demoxEmailInit) {
+      window.__demoxEmailInit = true;
+
+      let observer = null;
+      let obsTimeoutId = null;
+      let emailLogged = false;
+
+      function onEmailDetected(val) {
+        if (!val || userEmail) return;
+        userEmail = val;
+
+        try {
+          window.userEmail = userEmail;
+          chrome.runtime.sendMessage({
+            action: "setCurrentUserEmail",
+            email: userEmail,
+          });
+        } catch {
+          console.log("Unable to set window.userEmail");
+        }
+
+        if (!emailLogged) {
+          console.debug("User email detected :", userEmail);
+          emailLogged = true;
+        }
+        if (observer) {
+          try {
+            observer.disconnect();
+          } catch {}
+          observer = null;
+        }
+        if (obsTimeoutId) {
+          clearTimeout(obsTimeoutId);
+          obsTimeoutId = null;
+        }
+      }
+
+      const initial = readEmailFromDom();
+      if (initial) onEmailDetected(initial);
+
+      if (!userEmail) {
+        setTimeout(() => {
+          const val = readEmailFromDom();
+          if (val) onEmailDetected(val);
+        }, 500);
+      }
+
+      if (!userEmail) {
+        try {
+          observer = new MutationObserver(() => {
+            const val = readEmailFromDom();
+            if (val) onEmailDetected(val);
+          });
+          observer.observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+          });
+          obsTimeoutId = setTimeout(() => {
+            if (!userEmail) {
+              try {
+                window.userEmail = null;
+                chrome.runtime.sendMessage({
+                  action: "setCurrentUserEmail",
+                  email: null,
+                });
+                chrome.runtime.sendMessage({ action: "resetProgress" });
+              } catch {
+                console.log("Unable to set window.userEmail");
+              }
+              console.debug(
+                "User email not found within observation window (user likely not logged in)."
+              );
+            }
+            if (observer) {
+              try {
+                observer.disconnect();
+              } catch {}
+              observer = null;
+            }
+            obsTimeoutId = null;
+          }, 10000);
+        } catch {}
+      }
+    }
+  }
+
+  function fetchEmailFromSW(force = false) {
+    const now = Date.now();
+    if (!force && cachedEmail !== null && now - lastEmailFetchTs < 2000) {
+      return Promise.resolve(cachedEmail);
+    }
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ action: "getCurrentUserEmail" }, (res) => {
+          const email =
+            res && typeof res.email === "string" && res.email.length
+              ? res.email
+              : null;
+          cachedEmail = email;
+          lastEmailFetchTs = now;
+          resolve(cachedEmail);
+        });
+      } catch {
+        resolve(cachedEmail);
+      }
+    });
+  }
+
+  function getCurrentUserEmailFast() {
+    const email = readEmailFromDom();
+    console.log(email);
+    if (typeof email === "string" && email.length) {
+      try {
+        window.userEmail = email;
+        chrome.runtime.sendMessage({
+          action: "setCurrentUserEmail",
+          email: email,
+        });
+      } catch {
+        console.log("Unable to set window.userEmail");
+      } finally {
+        return email;
+      }
+    }
+    if (typeof userEmail === "string" && userEmail.length) return userEmail;
+    return cachedEmail;
+  }
 
   function parseUrl(href) {
     try {
@@ -177,8 +321,9 @@
     { capture: true }
   );
 
-  function sendNavigationEvent() {
+  async function sendNavigationEvent() {
     const { origin, pathname, queryKeys, search } = parseUrl(location.href);
+    await fetchEmailFromSW();
     const payload = {
       type: "navigation",
       time: new Date().toISOString(),
@@ -189,6 +334,7 @@
       routeVersion,
       vp: viewportBucket(),
       isTop: window.top === window.self,
+      userEmail: getCurrentUserEmailFast(),
     };
     safeSend({ action: "enqueueEvent", payload });
   }
@@ -203,6 +349,7 @@
         pageTitle: document.title,
         visible: document.visibilityState === "visible",
         routeVersion,
+        userEmail: getCurrentUserEmailFast(),
       };
       safeSend({ action: "enqueueEvent", payload });
     },
@@ -311,6 +458,7 @@
         files,
         filesCount,
         formInfo,
+        userEmail: getCurrentUserEmailFast(),
       };
 
       safeSend({ action: "enqueueEvent", payload });
@@ -370,6 +518,7 @@
             shiftKey: e.shiftKey,
             repeat: e.repeat,
             activeSelector: lastKeyTargetSelector,
+            userEmail: getCurrentUserEmailFast(),
             isTop: window.top === window.self,
           };
           safeSend({ action: "enqueueEvent", payload });
@@ -394,6 +543,7 @@
           buffer: keyBuffer,
           activeSelector: lastKeyTargetSelector,
           isTop: window.top === window.self,
+          userEmail: getCurrentUserEmailFast(),
         };
         safeSend({ action: "enqueueEvent", payload });
         keyBuffer = "";
@@ -406,6 +556,8 @@
       chrome.runtime.sendMessage(message);
     } catch {}
   }
-
-  sendNavigationEvent();
+  fetchEmailFromSW(true);
+  setTimeout(() => {
+    sendNavigationEvent();
+  }, 200);
 })();

@@ -258,10 +258,34 @@
         background: #cbd5e1;
         border-radius: 8px;
       }
+
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 12px;
+        line-height: 18px;
+      }
+      .badge.success {
+        background: #e6ffed;
+        color: #027a48;
+        border: 1px solid #12b76a;
+      }
+      .badge.warning {
+        background: #fff7ed;
+        color: #b93815;
+        border: 1px solid #f79009;
+      }
     </style>
   </head>
   <body>
     <h2>DemoX Solution Designer Experience Plugin</h2>
+
+    <div id="loginStatusRow" style="margin: 6px 0">
+      <span id="loginBadge" class="badge login" title="Login status"
+        >Unknown</span
+      >
+    </div>
 
     <div class="section">
       <div style="font-weight: 600; margin-bottom: 6px">Steps Source</div>

@@ -17,7 +17,11 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.pega.com/blueprint/*"],
+      "matches": [
+        "https://www.pega.com/blueprint/*",
+        "https://www.pega.com/blueprint",
+        "https://www.pega.com/blueprint?"
+      ],
       "js": ["contentScript.js"],
       "run_at": "document_start",
       "all_frames": true,

@@ -14,6 +14,7 @@ const K = {
   remoteSteps: "remoteSteps",
   stepsEtag: "stepsEtag",
   stepsStatus: "stepsStatus",
+  currentUserEmail: "currentUserEmail",
 };
 
 function getSessionArea() {
@@ -52,13 +53,21 @@ async function loadSession() {
     [K.remoteSteps]: remoteSteps = null,
     [K.stepsEtag]: stepsEtag = null,
     [K.stepsStatus]: stepsStatus = null,
+    [K.currentUserEmail]: currentUserEmail = null,
   } = await ses.get({
     [K.recentEvents]: [],
     [K.remoteSteps]: null,
     [K.stepsEtag]: null,
     [K.stepsStatus]: null,
+    [K.currentUserEmail]: null,
   });
-  return { recentEvents, remoteSteps, stepsEtag, stepsStatus };
+  return {
+    recentEvents,
+    remoteSteps,
+    stepsEtag,
+    stepsStatus,
+    currentUserEmail,
+  };
 }
 
 async function saveSession(partial) {
@@ -314,9 +323,28 @@ self.addEventListener("activate", (e) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.action === "setCurrentUserEmail") {
+    const email = typeof message.email === "string" ? message.email.trim() : "";
+    const val = email.length ? email : null;
+    console.log("SW: setCurrentUserEmail received");
+    saveSession({ [K.currentUserEmail]: val })
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message && message.action === "getCurrentUserEmail") {
+    const ses = getSessionArea();
+    ses
+      .get({ [K.currentUserEmail]: null })
+      .then((obj) => sendResponse({ email: obj[K.currentUserEmail] ?? null }))
+      .catch(() => sendResponse({ email: null }));
+    return true;
+  }
+
   if (message && message.action === "enqueueEvent") {
     enqueueEvent(message.payload).then(() => sendResponse({ ok: true }));
-    return true; // async
+    return true;
   }
 
   if (message && message.action === "getRecentEvents") {
@@ -378,14 +406,20 @@ async function enqueueEvent(ev) {
   try {
     await ensureStepsLoaded();
 
-    const { recentEvents } = await loadSession();
-    const { firedStepIds, totalPoints, matchedStepsLog } = await loadLocal();
+    const { recentEvents, currentUserEmail } = await loadSession();
 
     recentEvents.push(ev);
     if (recentEvents.length > RECENT_MAX) {
       recentEvents.splice(0, recentEvents.length - RECENT_MAX);
     }
+    if (!currentUserEmail) {
+      console.log("SW: No email found. Skipping matching/points for", ev.type);
+      await saveSession({ [K.recentEvents]: recentEvents });
+      return;
+    }
 
+    const { firedStepIds, totalPoints, matchedStepsLog } = await loadLocal();
+    console.log("SW event:", ev.type, "email=", ev.userEmail);
     const steps = await getActiveSteps();
     const idx = recentEvents.length - 1;
     const newlyFired = steps.length
@@ -431,6 +465,10 @@ async function getRecentEvents(limit = DEFAULT_RECENT_LIMIT) {
 
 async function postAwards(awards, totalPoints) {
   try {
+    const ses = getSessionArea();
+    const { [K.currentUserEmail]: currentUserEmail = null } = await ses.get({
+      [K.currentUserEmail]: null,
+    });
     const client = {
       ua:
         typeof navigator !== "undefined" && navigator.userAgent
@@ -438,7 +476,12 @@ async function postAwards(awards, totalPoints) {
           : "sw",
       version: chrome.runtime.getManifest?.().version || "dev",
     };
-    const body = JSON.stringify({ awards, totalPoints, client });
+    const body = JSON.stringify({
+      awards,
+      totalPoints,
+      client,
+      email: currentUserEmail,
+    });
     const res = await fetch(POINTS_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

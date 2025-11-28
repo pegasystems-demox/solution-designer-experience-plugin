@@ -7,6 +7,7 @@ const stepsBadge = document.getElementById("stepsBadge");
 const stepsMsg = document.getElementById("stepsMsg");
 const stepsMeta = document.getElementById("stepsMeta");
 const retryBtn = document.getElementById("retrySteps");
+const loginBadge = document.getElementById("loginBadge");
 
 function set(el, text) {
   if (el) el.textContent = text;
@@ -22,6 +23,11 @@ function cls(el, add, remove) {
 }
 function disable(el, v) {
   if (el) el.disabled = !!v;
+}
+
+function setPointsMessage(text, clss = []) {
+  set(pointsEl, text);
+  cls(pointsEl, clss, ["muted", "warning"]);
 }
 
 function escapeHtml(s) {
@@ -42,12 +48,41 @@ function pretty(obj) {
     return String(obj);
   }
 }
+
+async function fetchCurrentUserEmail() {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ action: "getCurrentUserEmail" }, (res) => {
+        const email =
+          res && typeof res.email === "string" && res.email.length
+            ? res.email
+            : null;
+        resolve(email);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function renderLoginBadge(email) {
+  if (!loginBadge) return;
+
+  if (email) {
+    set(loginBadge, `Logged in: ${email}`);
+    cls(loginBadge, "success", ["warning", "muted"]);
+  } else {
+    set(loginBadge, "Not logged in");
+    cls(loginBadge, "warning", ["success", "muted"]);
+  }
+}
+
 function safeToString(v) {
   if (v === null) return "null";
   if (v === undefined) return "undefined";
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
-  return null; // signals to render as JSON
+  return null;
 }
 function typeClass(t) {
   const k = (t || "").toLowerCase();
@@ -232,10 +267,17 @@ function loadStepsStatus() {
   });
 }
 function loadPoints() {
-  chrome.runtime.sendMessage({ action: "getPoints" }, (res) => {
-    const totalPoints = (res && res.totalPoints) || 0;
-    set(pointsEl, `Total Points: ${totalPoints}`);
+  fetchCurrentUserEmail().then((email) => {
+    if (!email) {
+      setPointsMessage("Please log in", "warning");
+      return;
+    }
+    chrome.runtime.sendMessage({ action: "getPoints" }, (res) => {
+      const totalPoints = (res && res.totalPoints) ?? 0;
+      set(pointsEl, `Total Points: ${totalPoints}`);
+    });
   });
+
   chrome.runtime.sendMessage({ action: "getFiredSteps" }, (res) => {
     const log = (res && res.matchedStepsLog) || [];
     if (!log.length) {
@@ -265,6 +307,8 @@ function loadRecent(limit = 20) {
 }
 
 async function refreshAll() {
+  const email = await fetchCurrentUserEmail();
+  renderLoginBadge(email);
   loadRecent(20);
   loadPoints();
   loadStepsStatus();
